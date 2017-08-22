@@ -1,6 +1,6 @@
 from setuptools import setup
 
-version = "0.1"
+version = "0.1.1"
 setup(
     name="telegram-qq-bot",
     version=version,
@@ -14,7 +14,7 @@ setup(
     classifiers=[
         "Development Status :: 1 - Planning",
         "Intended Audience :: Developers",
-        "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+        "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
         "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 3.5",
         "Topic :: Communications :: Chat",
