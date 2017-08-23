@@ -1,6 +1,6 @@
 from setuptools import setup
 
-version = "0.1.1"
+version = "0.2"
 setup(
     name="telegram-qq-bot",
     version=version,
@@ -9,10 +9,10 @@ setup(
     author_email="extremezhazha@gmail.com",
     license="GPLv3",
     keywords="python smartqq telegram",
-    install_requires=["python-smartqq-client", "pymongo"],
+    install_requires=["python-smartqq-client", "pymongo", "python-telegram-bot"],
     packages=["telegramqqbot"],
     classifiers=[
-        "Development Status :: 1 - Planning",
+        "Development Status :: 2 - Pre-Alpha",
         "Intended Audience :: Developers",
         "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
         "Programming Language :: Python :: 3",
