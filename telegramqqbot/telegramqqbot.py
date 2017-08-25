@@ -38,6 +38,7 @@ def start_handler(bot, update, user_data):
     user_data["logged_in"] = False
 
     def forward_contact_message_handler(message, env=None):
+        logger.info("received a message %s" % message)
         content = message["value"]
         uin = content["from_uin"]
         if user_data["print_all"] or (uin in user_data["subscribed_contact"]):
