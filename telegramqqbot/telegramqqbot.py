@@ -16,17 +16,68 @@ import json
 BOT_LOGIN, IDLE, LOGGED_IN, REPLYING = range(4)
 
 
-def get_callback_markup(text: str, data: list) -> InlineKeyboardMarkup:
-    button = InlineKeyboardButton(text=text, callback_data=json.dumps(data))
-    return InlineKeyboardMarkup([[button]])
+def double_map(func, list0, list1):
+    if len(list0) != len(list1):
+        return None
+    ans = []
+    for i in range(len(list0)):
+        ans.append(func(list0[i], list1[i]))
+    return ans
 
 
-def get_reply_contact_button(uin: int, name: str) -> InlineKeyboardMarkup:
-    return get_callback_markup("Reply", ["reply_contact", uin, name])
+def nested_double_map(func, nested_list0, nested_list1):
+    return double_map(lambda list0, list1: double_map(func, list0, list1), nested_list0, nested_list1)
 
 
-def get_reply_group_button(gid: int, name) -> InlineKeyboardMarkup:
-    return get_callback_markup("Reply", ["reply_group", gid, name])
+def get_callback_markup(text_list: [], data_list: []) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        nested_double_map(
+            lambda text, data: InlineKeyboardButton(text=text, callback_data=json.dumps(data)),
+            text_list, data_list
+        )
+    )
+
+
+def get_reply_contact_button(uin: int) -> InlineKeyboardMarkup:
+    return get_callback_markup([["Reply"]], [[["reply_contact", uin]]])
+
+
+def get_reply_group_button(gid: int) -> InlineKeyboardMarkup:
+    return get_callback_markup([["Reply"]], [[["reply_group", gid]]])
+
+
+def get_contact_keyboard(uin: int, subscribed):
+    return (
+        get_callback_markup([["Subscribe"]], [[["sub_contact", uin]]]) if uin not in subscribed
+        else get_callback_markup(
+            [["Unsubscribe", "Send message"]],
+            [[["unsub_contact", uin], ["reply_contact", uin]]]
+        )
+    )
+
+
+def get_group_keyboard(gid: int, subscribed):
+    return (
+        get_callback_markup([["Subscribe"]], [[["sub_group", gid]]]) if gid not in subscribed
+        else get_callback_markup(
+            [["Unsubscribe", "Send message"]],
+            [[["unsub_group", gid], ["reply_group", gid]]]
+        )
+    )
+
+
+def reply_subbed_contact(reply_callback, contact, subscribed_contact):
+    reply_callback(
+        text=SmartqqClient.get_user_name(contact),
+        reply_markup=get_contact_keyboard(contact["uin"], subscribed_contact)
+    )
+
+
+def reply_subbed_group(reply_callback, group, subscribed_group):
+    reply_callback(
+        text=SmartqqClient.get_group_name(group),
+        reply_markup=get_group_keyboard(group["gid"], subscribed_group)
+    )
 
 
 def error(bot, update, received_error):
@@ -38,7 +89,6 @@ def start_handler(bot, update, user_data):
     user_data["logged_in"] = False
 
     def forward_contact_message_handler(message, env=None):
-        logger.info("received a message %s" % message)
         content = message["value"]
         uin = content["from_uin"]
         if user_data["print_all"] or (uin in user_data["subscribed_contact"]):
@@ -48,7 +98,7 @@ def start_handler(bot, update, user_data):
                     name,
                     SmartqqClient.get_message_content(content)
                 ),
-                reply_markup=get_reply_contact_button(uin, name)
+                reply_markup=get_reply_contact_button(uin)
             )
 
     def forward_group_message_handler(message, env=None):
@@ -64,7 +114,7 @@ def start_handler(bot, update, user_data):
                     SmartqqClient.get_user_name(group_manager.get_member_info(gid, uin)),
                     SmartqqClient.get_message_content(content)
                 ),
-                reply_markup=get_reply_group_button(gid, name)
+                reply_markup=get_reply_group_button(gid)
             )
 
     def login_done():
@@ -141,37 +191,22 @@ def logout_handler(bot, update, user_data):
     return IDLE
 
 
-def get_button(item_id: int, subscribed, sub_str, unsub_str):
-    return (
-        get_callback_markup("Subscribe", [sub_str, item_id]) if item_id not in subscribed
-        else get_callback_markup("Unsubscribe", [unsub_str, item_id])
-    )
-
-
-def get_contact_button(uin: int, subscribed):
-    return get_button(uin, subscribed, "sub_contact", "unsub_contact")
-
-
-def get_group_button(gid: int, subscribed):
-    return get_button(gid, subscribed, "sub_group", "unsub_group")
-
-
 def reply_with_contact(reply_callback, contact, subscribed_contact):
     reply_callback(
         text=SmartqqClient.get_user_name(contact),
-        reply_markup=get_contact_button(contact["uin"], subscribed_contact)
+        reply_markup=get_contact_keyboard(contact["uin"], subscribed_contact)
     )
 
 
 def reply_with_group(reply_callback, group, subscribed_group):
     reply_callback(
         text=SmartqqClient.get_group_name(group),
-        reply_markup=get_group_button(group["gid"], subscribed_group)
+        reply_markup=get_group_keyboard(group["gid"], subscribed_group)
     )
 
 
 def get_category_button(category):
-    return get_callback_markup("List", ["list_category", category["index"], category["name"]])
+    return get_callback_markup([["List"]], [[["list_category", category["index"]]]])
 
 
 def reply_with_category(update, category):
@@ -205,9 +240,10 @@ def list_category_handler(bot, update, user_data):
     client_contact_manager = user_data["env"]["contact_manager"]
     query = json.loads(update.callback_query.data)
     contacts = client_contact_manager.get_contacts_info_in_category(query[1])
-    reply_callback("Contacts under category [%s]:" % query[2])
+    reply_callback("Contacts under selected category:")
     for contact in contacts:
         reply_with_contact(reply_callback, contact, user_data["subscribed_contact"])
+    update.callback_query.answer()
     return LOGGED_IN
 
 
@@ -254,8 +290,9 @@ def sub_contact_callback_handler(bot, update, user_data):
     query = json.loads(update.callback_query.data)
     contact = subscribe_contact(user_data, query[1])
     update.callback_query.message.edit_reply_markup(
-        reply_markup=get_contact_button(contact["uin"], user_data["subscribed_contact"])
+        reply_markup=get_contact_keyboard(contact["uin"], user_data["subscribed_contact"])
     )
+    update.callback_query.answer()
     return LOGGED_IN
 
 
@@ -263,8 +300,9 @@ def unsub_contact_callback_handler(bot, update, user_data):
     uin = json.loads(update.callback_query.data)[1]
     unsubscribe_contact(user_data, uin)
     update.callback_query.message.edit_reply_markup(
-        reply_markup=get_contact_button(uin, user_data["subscribed_contact"])
+        reply_markup=get_contact_keyboard(uin, user_data["subscribed_contact"])
     )
+    update.callback_query.answer()
     return LOGGED_IN
 
 
@@ -286,8 +324,9 @@ def sub_group_callback_handler(bot, update, user_data):
     query = json.loads(update.callback_query.data)
     group = subscribe_group(user_data, query[1])
     update.callback_query.message.edit_reply_markup(
-        reply_markup=get_group_button(group["gid"], user_data["subscribed_group"])
+        reply_markup=get_group_keyboard(group["gid"], user_data["subscribed_group"])
     )
+    update.callback_query.answer()
     return LOGGED_IN
 
 
@@ -295,8 +334,9 @@ def unsub_group_callback_handler(bot, update, user_data):
     gid = json.loads(update.callback_query.data)[1]
     unsubscribe_group(user_data, gid)
     update.callback_query.message.edit_reply_markup(
-        reply_markup=get_group_button(gid, user_data["subscribed_group"])
+        reply_markup=get_contact_keyboard(gid, user_data["subscribed_group"])
     )
+    update.callback_query.answer()
     return LOGGED_IN
 
 
@@ -333,26 +373,34 @@ def resub_handler(bot, update, user_data):
 
 
 def get_reply_cancel_button() -> InlineKeyboardMarkup:
-    return get_callback_markup("Cancel", ["cancel_reply", 0])
+    return get_callback_markup([["Cancel"]], [[["cancel_reply", 0]]])
 
 
 def reply_contact_handler(bot, update, user_data):
     query = json.loads(update.callback_query.data)
+    if "hint_message" in user_data:
+        user_data["hint_message"].delete()
     user_data["reply_callback"] = lambda x: user_data["client"].send_message(query[1], x)
-    update.callback_query.message.reply_text(
-        "Replying to [%s]:" % query[2],
+    user_data["callback_query"] = update.callback_query
+    user_data["hint_message"] = update.callback_query.message.reply_text(
+        "Sending message to [%s]:" % user_data["subscribed_contact"][query[1]],
         reply_markup=get_reply_cancel_button()
     )
+    update.callback_query.answer()
     return REPLYING
 
 
 def reply_group_handler(bot, update, user_data):
     query = json.loads(update.callback_query.data)
+    if "hint_message" in user_data:
+        user_data["hint_message"].delete()
     user_data["reply_callback"] = lambda x: user_data["client"].send_group_message(query[1], x)
-    update.callback_query.message.reply_text(
-        "Replying to group [%s]:" % query[2],
+    user_data["callback_query"] = update.callback_query
+    user_data["hint_message"] = update.callback_query.message.reply_text(
+        "Sending message to group [%s]:" % user_data["subscribed_group"][query[1]],
         reply_markup=get_reply_cancel_button()
     )
+    update.callback_query.answer()
     return REPLYING
 
 
@@ -360,15 +408,24 @@ def replying_handler(bot, update, user_data):
     if "reply_callback" not in user_data:
         return LOGGED_IN
     user_data["reply_callback"](update.message.text)
+    user_data["callback_query"].answer(text="Message successfully sent")
+    user_data["hint_message"].delete()
     del user_data["reply_callback"]
+    del user_data["callback_query"]
+    del user_data["hint_message"]
     return LOGGED_IN
 
 
 def cancel_reply_handler(bot, update, user_data):
-    update.callback_query.message.edit_text("Reply cancelled.")
     if "reply_callback" not in user_data:
+        update.callback_query.answer("No pending replies")
+        update.callback_query.message.delete()
         return LOGGED_IN
+    update.callback_query.answer(text="Reply cancelled")
+    user_data["hint_message"].delete()
     del user_data["reply_callback"]
+    del user_data["callback_query"]
+    del user_data["hint_message"]
     return LOGGED_IN
 
 
