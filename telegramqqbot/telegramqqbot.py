@@ -46,7 +46,7 @@ def get_reply_group_button(gid: int) -> InlineKeyboardMarkup:
     return get_callback_markup([["Reply"]], [[["reply_group", gid]]])
 
 
-def get_contact_keyboard(uin: int, subscribed):
+def get_contact_keyboard(uin: int, subscribed) -> InlineKeyboardMarkup:
     return (
         get_callback_markup([["Subscribe"]], [[["sub_contact", uin]]]) if uin not in subscribed
         else get_callback_markup(
@@ -56,7 +56,7 @@ def get_contact_keyboard(uin: int, subscribed):
     )
 
 
-def get_group_keyboard(gid: int, subscribed):
+def get_group_keyboard(gid: int, subscribed) -> InlineKeyboardMarkup:
     return (
         get_callback_markup([["Subscribe"]], [[["sub_group", gid]]]) if gid not in subscribed
         else get_callback_markup(
@@ -386,7 +386,6 @@ def reply_contact_handler(bot, update, user_data):
         "Sending message to [%s]:" % user_data["subscribed_contact"][query[1]],
         reply_markup=get_reply_cancel_button()
     )
-    update.callback_query.answer()
     return REPLYING
 
 
@@ -400,7 +399,6 @@ def reply_group_handler(bot, update, user_data):
         "Sending message to group [%s]:" % user_data["subscribed_group"][query[1]],
         reply_markup=get_reply_cancel_button()
     )
-    update.callback_query.answer()
     return REPLYING
 
 
@@ -408,12 +406,14 @@ def replying_handler(bot, update, user_data):
     if "reply_callback" not in user_data:
         return LOGGED_IN
     user_data["reply_callback"](update.message.text)
-    user_data["callback_query"].answer(text="Message successfully sent")
-    user_data["hint_message"].delete()
-    del user_data["reply_callback"]
-    del user_data["callback_query"]
-    del user_data["hint_message"]
-    return LOGGED_IN
+    try:
+        user_data["callback_query"].answer(text="Message successfully sent")
+    finally:
+        user_data["hint_message"].delete()
+        del user_data["reply_callback"]
+        del user_data["callback_query"]
+        del user_data["hint_message"]
+        return LOGGED_IN
 
 
 def cancel_reply_handler(bot, update, user_data):
@@ -421,12 +421,14 @@ def cancel_reply_handler(bot, update, user_data):
         update.callback_query.answer("No pending replies")
         update.callback_query.message.delete()
         return LOGGED_IN
-    update.callback_query.answer(text="Reply cancelled")
-    user_data["hint_message"].delete()
-    del user_data["reply_callback"]
-    del user_data["callback_query"]
-    del user_data["hint_message"]
-    return LOGGED_IN
+    try:
+        user_data["callback_query"].answer(text="Message cancelled")
+    finally:
+        user_data["hint_message"].delete()
+        del user_data["reply_callback"]
+        del user_data["callback_query"]
+        del user_data["hint_message"]
+        return LOGGED_IN
 
 
 def main():
