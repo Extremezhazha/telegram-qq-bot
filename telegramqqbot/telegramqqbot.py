@@ -1,6 +1,7 @@
 from pyqqclient.SmartqqClient import SmartqqClient
 from pyqqclient.Logger import logger
 from pyqqclient.UnknownUserException import UnknownUserException
+from pyqqclient.LoginExpiredException import LoginExpiredException
 from telegram.ext import Updater
 from telegram.ext import CommandHandler
 from telegram.ext import MessageHandler
@@ -117,6 +118,10 @@ def start_handler(bot, update, user_data):
                 reply_markup=get_reply_group_button(gid)
             )
 
+    def message_exception_handler(ex):
+        if ex.__class__ == LoginExpiredException:
+            update.message.reply_text("Login expired, please use /logout and /clear_login to login again.")
+
     def login_done():
         user_data["logged_in"] = True
         user_data["env"] = user_data["client"].env
@@ -128,6 +133,7 @@ def start_handler(bot, update, user_data):
         db_identify_string=str(update.message.chat_id),
         friend_message_handler=forward_contact_message_handler,
         group_message_handler=forward_group_message_handler,
+        message_exception_handler=message_exception_handler,
         login_done_handler=login_done,
         passing_env=True
     )
@@ -173,11 +179,11 @@ def bot_login_handler(bot, update):
         return BOT_LOGIN
 
 
-def logout_handler(bot, update, user_data):
+def logout(reply_callback, user_data):
     client = user_data["client"]
     client_thread = user_data["client_thread"]
     client.stopped = True
-    update.message.reply_text("Waiting for the client instance to stop...")
+    reply_callback("Waiting for the client instance to stop...")
     client_thread.join()
     client.db_clear_all()
     history_contact_name = set(user_data["subscribed_contact"].values())
@@ -187,7 +193,11 @@ def logout_handler(bot, update, user_data):
     user_data["logged_in"] = False
     user_data["history_contact_name"] = history_contact_name
     user_data["history_group_name"] = history_group_name
-    update.message.reply_text("Logged out.")
+    reply_callback("Logged out.")
+
+
+def logout_handler(bot, update, user_data):
+    logout(update.message.reply_text, user_data)
     return IDLE
 
 
