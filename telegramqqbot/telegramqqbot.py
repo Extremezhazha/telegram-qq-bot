@@ -88,13 +88,14 @@ def error(bot, update, received_error):
 def start_handler(bot, update, user_data):
     update.message.reply_text("Hello there, if you're my master, type the password below:")
     user_data["logged_in"] = False
+    user_data["listed_items"] = []
 
     def forward_contact_message_handler(message, env=None):
         content = message["value"]
         uin = content["from_uin"]
         if user_data["print_all"] or (uin in user_data["subscribed_contact"]):
             name = SmartqqClient.get_user_name(env["contact_manager"].get_contact_info(uin))
-            update.message.reply_text(
+            return update.message.reply_text(
                 "[%s]%s" % (
                     name,
                     SmartqqClient.get_message_content(content)
@@ -106,10 +107,12 @@ def start_handler(bot, update, user_data):
         content = message["value"]
         gid = content["from_uin"]
         uin = content["send_uin"]
+        if uin == env["uin"]:
+            return None
         group_manager = env["group_manager"]
         if user_data["print_all"] or (gid in user_data["subscribed_group"]):
             name = SmartqqClient.get_group_name(group_manager.get_group_info(gid))
-            update.message.reply_text(
+            return update.message.reply_text(
                 "[[%s] - [%s]]%s" % (
                     name,
                     SmartqqClient.get_user_name(group_manager.get_member_info(gid, uin)),
@@ -188,11 +191,13 @@ def logout(reply_callback, user_data):
     client.db_clear_all()
     history_contact_name = set(user_data["subscribed_contact"].values())
     history_group_name = set(user_data["subscribed_group"].values())
+    history_listed_items = user_data["listed_items"]
     user_data.clear()
     user_data["client"] = client
     user_data["logged_in"] = False
     user_data["history_contact_name"] = history_contact_name
     user_data["history_group_name"] = history_group_name
+    user_data["listed_items"] = history_listed_items
     reply_callback("Logged out.")
 
 
@@ -237,8 +242,9 @@ def list_contact_handler(bot, update, user_data, args=None):
             reply_with_category(update, category)
     else:
         contacts = client_contact_manager.get_contacts_info()
+        listed_items = user_data["listed_items"]
         for contact in contacts:
-            reply_with_contact(update.message.reply_text, contact, user_data["subscribed_contact"])
+            listed_items.append(reply_with_contact(update.message.reply_text, contact, user_data["subscribed_contact"]))
     return LOGGED_IN
 
 
@@ -247,38 +253,51 @@ def list_category_handler(bot, update, user_data):
     if not user_data["logged_in"]:
         reply_callback("The login process haven't finished, please wait for a few seconds...")
         return LOGGED_IN
+    listed_items = user_data["listed_items"]
     client_contact_manager = user_data["env"]["contact_manager"]
     query = json.loads(update.callback_query.data)
     contacts = client_contact_manager.get_contacts_info_in_category(query[1])
-    reply_callback("Contacts under selected category:")
+    listed_items.append(reply_callback("Contacts under selected category:"))
     for contact in contacts:
-        reply_with_contact(reply_callback, contact, user_data["subscribed_contact"])
+        listed_items.append(reply_with_contact(reply_callback, contact, user_data["subscribed_contact"]))
     update.callback_query.answer()
     return LOGGED_IN
 
 
 def list_group_handler(bot, update, user_data):
+    listed_items = user_data["listed_items"]
     if not user_data["logged_in"]:
-        update.message.reply_text("The login process haven't finished, please wait for a few seconds...")
+        listed_items.append(update.message.reply_text("The login process haven't finished," +
+                                                      " please wait for a few seconds..."))
         return LOGGED_IN
     client_group_manager = user_data["env"]["group_manager"]
     groups = client_group_manager.get_groups_info()
     for group in groups:
-        reply_with_group(update.message.reply_text, group, user_data["subscribed_group"])
+        listed_items.append(reply_with_group(update.message.reply_text, group, user_data["subscribed_group"]))
     return LOGGED_IN
 
 
 def list_subscribed_handler(bot, update, user_data):
-    update.message.reply_text("Subscribed contacts:")
+    listed_items = user_data["listed_items"]
+    listed_items.append(update.message.reply_text("Subscribed contacts:"))
     subscribed_contact = user_data["subscribed_contact"]
     client_contact_manager = user_data["env"]["contact_manager"]
     for contact in map(client_contact_manager.get_contact_info, subscribed_contact.keys()):
-        reply_with_contact(update.message.reply_text, contact, subscribed_contact)
-    update.message.reply_text("Subscribed groups:")
+        listed_items.append(reply_with_contact(update.message.reply_text, contact, subscribed_contact))
+    listed_items.append(update.message.reply_text("Subscribed groups:"))
     subscribed_group = user_data["subscribed_group"]
     client_group_manager = user_data["env"]["group_manager"]
     for group in map(client_group_manager.get_group_info, subscribed_group.keys()):
-        reply_with_group(update.message.reply_text, group, subscribed_group)
+        listed_items.append(reply_with_group(update.message.reply_text, group, subscribed_group))
+    return LOGGED_IN
+
+
+def clear_list_handler(bot, update, user_data):
+    listed_items = user_data["listed_items"]
+    for item in listed_items:
+        item.delete()
+    user_data["listed_items"].clear()
+    update.message.reply_text("Cleared listed items.")
     return LOGGED_IN
 
 
@@ -415,7 +434,8 @@ def reply_group_handler(bot, update, user_data):
 def replying_handler(bot, update, user_data):
     if "reply_callback" not in user_data:
         return LOGGED_IN
-    user_data["reply_callback"](update.message.text)
+    response = user_data["reply_callback"](update.message.text)
+    logger.info("replying " + update.message.text + " with response: " + repr(response))
     try:
         user_data["callback_query"].answer(text="Message successfully sent")
     finally:
@@ -467,6 +487,7 @@ def main():
                 CommandHandler("list_groups", list_group_handler, pass_user_data=True),
                 CommandHandler("list_subscribed", list_subscribed_handler, pass_user_data=True),
                 CommandHandler("resub", resub_handler, pass_user_data=True),
+                CommandHandler("clear_listed", clear_list_handler, pass_user_data=True),
                 CallbackQueryHandler(sub_contact_callback_handler, pass_user_data=True,
                                      pattern="^\[\"sub_contact\", .+\]$"),
                 CallbackQueryHandler(unsub_contact_callback_handler, pass_user_data=True,
