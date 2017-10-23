@@ -107,7 +107,7 @@ def start_handler(bot, update, user_data):
         content = message["value"]
         gid = content["from_uin"]
         uin = content["send_uin"]
-        if uin == env["uin"]:
+        if env is not None and uin == env["uin"]:
             return None
         group_manager = env["group_manager"]
         if user_data["print_all"] or (gid in user_data["subscribed_group"]):
@@ -207,14 +207,14 @@ def logout_handler(bot, update, user_data):
 
 
 def reply_with_contact(reply_callback, contact, subscribed_contact):
-    reply_callback(
+    return reply_callback(
         text=SmartqqClient.get_user_name(contact),
         reply_markup=get_contact_keyboard(contact["uin"], subscribed_contact)
     )
 
 
 def reply_with_group(reply_callback, group, subscribed_group):
-    reply_callback(
+    return reply_callback(
         text=SmartqqClient.get_group_name(group),
         reply_markup=get_group_keyboard(group["gid"], subscribed_group)
     )
@@ -225,13 +225,14 @@ def get_category_button(category):
 
 
 def reply_with_category(update, category):
-    update.message.reply_text(
+    return update.message.reply_text(
         text=category["name"],
         reply_markup=get_category_button(category)
     )
 
 
 def list_contact_handler(bot, update, user_data, args=None):
+    listed_items = user_data["listed_items"]
     if not user_data["logged_in"]:
         update.message.reply_text("The login process haven't finished, please wait for a few seconds...")
         return LOGGED_IN
@@ -239,10 +240,9 @@ def list_contact_handler(bot, update, user_data, args=None):
     if (args is not None) and ("-c" in args):
         categories = client_contact_manager.get_categories_info()
         for category in categories:
-            reply_with_category(update, category)
+            listed_items.append(reply_with_category(update, category))
     else:
         contacts = client_contact_manager.get_contacts_info()
-        listed_items = user_data["listed_items"]
         for contact in contacts:
             listed_items.append(reply_with_contact(update.message.reply_text, contact, user_data["subscribed_contact"]))
     return LOGGED_IN
@@ -405,10 +405,17 @@ def get_reply_cancel_button() -> InlineKeyboardMarkup:
     return get_callback_markup([["Cancel"]], [[["cancel_reply", 0]]])
 
 
-def reply_contact_handler(bot, update, user_data):
-    query = json.loads(update.callback_query.data)
+def clear_hints(user_data):
     if "hint_message" in user_data:
         user_data["hint_message"].delete()
+    if "replied_hint_message" in user_data:
+        user_data["replied_hint_message"].delete()
+        del user_data["replied_hint_message"]
+
+
+def reply_contact_handler(bot, update, user_data):
+    query = json.loads(update.callback_query.data)
+    clear_hints(user_data)
     user_data["reply_callback"] = lambda x: user_data["client"].send_message(query[1], x)
     user_data["callback_query"] = update.callback_query
     user_data["hint_message"] = update.callback_query.message.reply_text(
@@ -420,8 +427,7 @@ def reply_contact_handler(bot, update, user_data):
 
 def reply_group_handler(bot, update, user_data):
     query = json.loads(update.callback_query.data)
-    if "hint_message" in user_data:
-        user_data["hint_message"].delete()
+    clear_hints(user_data)
     user_data["reply_callback"] = lambda x: user_data["client"].send_group_message(query[1], x)
     user_data["callback_query"] = update.callback_query
     user_data["hint_message"] = update.callback_query.message.reply_text(
@@ -435,7 +441,9 @@ def replying_handler(bot, update, user_data):
     if "reply_callback" not in user_data:
         return LOGGED_IN
     response = user_data["reply_callback"](update.message.text)
-    logger.info("replying " + update.message.text + " with response: " + repr(response))
+    # logger.info("replying " + update.message.text + " with response: " + repr(response))
+    user_data["replied_hint_message"] = update.message.reply_text("The message above has been sent, with response:" +
+                                                                  repr(response))
     try:
         user_data["callback_query"].answer(text="Message successfully sent")
     finally:
